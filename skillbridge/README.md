@@ -2,7 +2,7 @@
 
 A comprehensive educational platform connecting students, speakers, and faculty members for skill development and knowledge sharing.
 
-![SkillBridge](https://skillbridge-1a913.web.app)
+![Homepage](src/assets/logo.png)
 
 ## 🌟 Live Demo
 
@@ -135,12 +135,10 @@ Before running this project, make sure you have the following installed:
 1. **Create a Firebase project** at [https://console.firebase.google.com/](https://console.firebase.google.com/)
 
 2. **Enable Authentication:**
-
    - Go to Authentication > Sign-in method
    - Enable Email/Password authentication
 
 3. **Set up Firestore Database:**
-
    - Create a Firestore database
    - Configure security rules (see `firebase.rules`)
 

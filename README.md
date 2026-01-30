@@ -1,6 +1,6 @@
 # Skill Bridge
 
-![Homepage](bridge/assets/hero-image.jpg)
+![Homepage](bridge/assets/hero-image.png)
 
 ## Overview
 

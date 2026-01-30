@@ -24,7 +24,6 @@ The purpose of Skill Bridge is to:
 - **Feedback System:** Attendees can provide feedback and ratings for sessions.
 - **Dashboards:** Personalized dashboards for students, speakers, and faculty to manage their activities.
 - **Session Listings:** Browse upcoming and past sessions with detailed information.
-- **Notifications:** Alerts and confirmations for important actions and updates.
 
 ---
 

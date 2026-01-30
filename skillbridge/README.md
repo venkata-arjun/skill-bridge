@@ -370,7 +370,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Email:** skillbridge.portal@gmail.com
 - **Website:** [https://skillbridge-1a913.web.app](https://skillbridge-1a913.web.app)
-- **GitHub:** [https://github.com/your-username/skillbridge](https://github.com/your-username/skillbridge)
+- **GitHub:** [https://github.com/venkata-arjun/skill-bridge](https://github.com/venkata-arjun/skill-bridge)
 
 ### Support
 

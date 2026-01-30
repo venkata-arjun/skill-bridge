@@ -28,4 +28,6 @@ The purpose of Skill Bridge is to:
 
 ---
 
-For more details, see the documentation in the `skillbridge/` folder.
+For more details, see the documentation in the `skillbridge/` folder.  
+[View Project README](https://github.com/venkata-arjun/skill-bridge/tree/master/skillbridge#readme)
+

@@ -1,0 +1,306 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // -----------------------
+    // Sessions collection
+    // -----------------------
+    match /sessions/{sessionId} {
+      // Only authenticated users can read sessions
+      allow read: if request.auth != null;
+
+      // create: only signed-in users, authorId must equal auth.uid, status must be "pending" or "proposed",
+      // and required fields must have correct types (basic validation)
+      allow create: if request.auth != null
+        && request.auth.uid == request.auth.uid
+        && request.resource.data.authorId == request.auth.uid
+        && (request.resource.data.status == "pending" || request.resource.data.status == "proposed")
+        && request.resource.data.title is string
+        && request.resource.data.description is string
+        && (!("upvotes" in request.resource.data) || request.resource.data.upvotes is number || request.resource.data.upvotes == null);
+
+      // update/delete: allowed to author OR faculty OR for attendeeCount/upvotes updates
+      // additionally validate updated fields (no arbitrary field type changes)
+      allow update, delete: if request.auth != null
+        && (
+          request.auth.uid == resource.data.authorId
+          || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty')
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["attendeeCount"]) && request.resource.data.attendeeCount is number)
+          || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(["upvotes"]) && request.resource.data.upvotes is number)
+        )
+        // basic validation on updates
+        && (
+          (!("status" in request.resource.data) || request.resource.data.status in ["pending","approved","rejected","proposed"])
+        )
+        && (
+          (!("title" in request.resource.data) || request.resource.data.title is string)
+        )
+        && (
+          (!("description" in request.resource.data) || request.resource.data.description is string)
+        )
+        && (
+          (!("tags" in request.resource.data) || request.resource.data.tags is list)
+        )
+        && (
+          (!("attendeeCount" in request.resource.data) || request.resource.data.attendeeCount is number)
+        )
+        && (
+          (!("upvotes" in request.resource.data) || request.resource.data.upvotes is number)
+        );
+    }
+
+    // -----------------------
+    // Users collection
+    // -----------------------
+    match /users/{userId} {
+      // create: user may create their own doc; role should be one of allowed values
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email is string
+        && (request.resource.data.displayName is string || request.resource.data.displayName == null)
+        && request.resource.data.role in ['student','speaker','faculty']
+        && (request.resource.data.bio is string || request.resource.data.bio == null)
+        && (request.resource.data.skills is list || request.resource.data.skills == null)
+        && (request.resource.data.isFacultyVerified == bool || request.resource.data.isFacultyVerified == null)
+        && (request.resource.data.createdAt is timestamp || request.resource.data.createdAt == null);
+
+      // read: users can read their own profile, and authenticated users can read others
+      allow read: if request.auth != null &&
+        (request.auth.uid == userId ||
+         exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+
+      // update: users can update their own profile including bio and skills
+      // faculty can update role for promoting users to speaker
+      allow update: if request.auth != null &&
+        (request.auth.uid == userId ||
+         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty'))
+        && (
+          request.auth.uid == userId
+          // allow updating bio, skills, displayName, linkedin, github, headline, and phone
+          && (
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["bio"]) || request.resource.data.bio is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["skills"]) || request.resource.data.skills is list) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["displayName"]) || request.resource.data.displayName is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["linkedin"]) || request.resource.data.linkedin is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["github"]) || request.resource.data.github is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["headline"]) || request.resource.data.headline is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["phone"]) || request.resource.data.phone is string) &&
+            (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["profileUrl"]) || request.resource.data.profileUrl is string)
+          )
+          // disallow role changes from client (except for faculty)
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["role"]) || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty')
+          // disallow changing uid and email
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["uid"]))
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["email"]))
+        ) ||
+        (
+          // faculty can update role and promotion fields for any user
+          exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["role", "promotedBy", "promotedAt"])
+          && request.resource.data.role in ['student', 'speaker', 'faculty']
+        );
+    }
+
+    // -----------------------
+    // Registrations collection
+    // -----------------------
+    match /registrations/{regId} {
+      // create: allow authenticated users to register for sessions
+      // Allow registration for approved OR pending sessions (faculty can approve later)
+      allow create: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && request.resource.data.attendeeId == request.auth.uid
+        && request.resource.data.sessionId is string
+        // ensure session exists
+        && exists(/databases/$(database)/documents/sessions/$(request.resource.data.sessionId));
+
+      // read: allow authenticated users to read registrations
+      allow read: if request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      // allow delete by the attendee who created it OR by faculty (so students can unregister)
+      allow delete: if request.auth != null && request.auth.uid == resource.data.attendeeId;
+
+      // updates: only by faculty (admin corrections)
+      allow update: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty';
+    }
+
+    // -----------------------
+    // Feedback collection
+    // -----------------------
+    match /feedback/{feedbackId} {
+      // Create: allow authenticated attendee to create feedback for themselves
+      allow create: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        request.auth.uid == request.resource.data.attendeeId &&
+        request.resource.data.sessionId is string &&
+        request.resource.data.rating is number &&
+        request.resource.data.comment is string;
+      
+      // Read: allow authenticated users to read all feedback (for ratings display)
+      allow read: if request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+      
+      // Update/Delete: only the attendee can modify their own feedback
+      allow update, delete: if request.auth != null &&
+        exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+        request.auth.uid == resource.data.attendeeId;
+    }
+
+    // -----------------------
+    // Speaker Proposals collection
+    // -----------------------
+    match /speakerProposals/{proposalId} {
+      // Create: allow students to create their own proposals
+      allow create: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && request.auth.uid == request.resource.data.studentId
+        && request.resource.data.status == "pending"
+        && request.resource.data.name is string
+        && request.resource.data.email is string
+        && request.resource.data.year is string
+        && request.resource.data.resume is string;
+
+      // Read: allow authenticated users with valid roles to read proposals
+      allow read: if request.auth != null && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+
+      /*
+        Update rules (faculty):
+        - faculty may change status to scheduled, approved, rejected, final_approved, final_disapproved
+        - when scheduling, require interviewDate/interviewTime/interviewVenue
+        - final approvals/rejections allowed only AFTER the scheduled interview timestamp has passed
+        - restrict which keys faculty may change
+        - studentId immutable
+      */
+      allow update: if request.auth != null
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == "faculty"
+        // allowed status values
+        && request.resource.data.status in ["approved", "rejected", "scheduled", "final_approved", "final_disapproved"]
+        // studentId must remain unchanged (or not present in client update)
+        && (!("studentId" in request.resource.data) || request.resource.data.studentId == resource.data.studentId)
+        // only allow faculty to change a limited set of fields in an update
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "interviewDate",
+          "interviewTime",
+          "interviewVenue",
+          "interviewTimestamp",
+          "notes",
+          "rejectionMessage",
+          "disapprovalMessage"
+        ])
+        // when scheduling, require interview fields and validate types
+        && (
+          request.resource.data.status != "scheduled"
+          || (
+            ("interviewDate" in request.resource.data)
+            && ("interviewTime" in request.resource.data)
+            && ("interviewVenue" in request.resource.data)
+            && ("interviewTimestamp" in request.resource.data)
+          )
+        )
+        && (
+          (!("interviewDate" in request.resource.data) || request.resource.data.interviewDate is string)
+          && (!("interviewTime" in request.resource.data) || request.resource.data.interviewTime is string)
+          && (!("interviewVenue" in request.resource.data) || request.resource.data.interviewVenue is string)
+          && (!("interviewTimestamp" in request.resource.data) || request.resource.data.interviewTimestamp is timestamp)
+          && (!("notes" in request.resource.data) || request.resource.data.notes is string)
+          && (!("rejectionMessage" in request.resource.data) || request.resource.data.rejectionMessage is string)
+          && (!("disapprovalMessage" in request.resource.data) || request.resource.data.disapprovalMessage is string)
+        )
+        // final approvals/rejections can only be applied after the scheduled interview time
+        // and cannot be applied to already finalized proposals
+        && (
+          !(request.resource.data.status in ["final_approved", "final_disapproved"])
+          || (
+            ("interviewTimestamp" in resource.data)
+            && request.time > resource.data.interviewTimestamp
+            && !(resource.data.status in ["final_approved", "final_disapproved"])
+          )
+        );
+    }
+
+    // -----------------------
+    // Student Requests collection
+    // -----------------------
+    match /studentRequests/{requestId} {
+      // Create: allow authenticated users to create their own requests
+      // Note: do not require a users/{uid} document here to support clients that
+      // haven't created a profile document yet. Higher-privilege ops still require
+      // a users doc and role checks.
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.studentId
+        && request.resource.data.status == "pending"
+        && request.resource.data.topic is string
+        && (request.resource.data.description is string || request.resource.data.description == null)
+        && (!("category" in request.resource.data) || request.resource.data.category is string || request.resource.data.category == null)
+        && (!("preferredDate" in request.resource.data) || request.resource.data.preferredDate is string || request.resource.data.preferredDate == null)
+        && (request.resource.data.mergedCount is number || request.resource.data.mergedCount == null)
+        && (request.resource.data.createdAt is timestamp || request.resource.data.createdAt == null)
+        && (request.resource.data.studentName is string || request.resource.data.studentName == null)
+        && (request.resource.data.studentEmail is string || request.resource.data.studentEmail == null);
+
+      // Read: allow authenticated users to read requests
+      allow read: if request.auth != null;
+
+      // Update: allow faculty to update status/approval fields and mergedCount
+      // Allow the owning student to edit certain non-privileged fields (description/category/preferredDate)
+      allow update: if request.auth != null
+        && (
+          // faculty branch: can change status and related approval/session links (faculty must have a users doc with role)
+          (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty'
+            && request.resource.data.status in ["pending", "approved", "rejected", "merged"]
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(["status","approvedBy","approvedAt","sessionId","mergedCount"]) 
+          )
+          // student branch: owner can update non-privileged fields
+          || (
+            request.auth.uid == resource.data.studentId
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["status","approvedBy","approvedAt","sessionId"]))
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["topic"]) || request.resource.data.topic is string)
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["description"]) || request.resource.data.description is string)
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["category"]) || request.resource.data.category is string)
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(["preferredDate"]) || request.resource.data.preferredDate is string)
+          )
+        );
+
+      // Delete: allow owner or faculty to delete (faculty branch requires users doc)
+      allow delete: if request.auth != null
+        && (
+          request.auth.uid == resource.data.studentId
+          || (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'faculty')
+        );
+    }
+
+    // -----------------------
+    // Session Upvotes collection
+    // -----------------------
+    match /sessionUpvotes/{upvoteId} {
+      // Create: allow authenticated users to upvote sessions (prevent duplicates)
+      allow create: if request.auth != null
+        && request.auth.uid == request.resource.data.userId
+        && request.resource.data.sessionId is string
+        && (request.resource.data.createdAt is timestamp || request.resource.data.createdAt == null)
+        // Prevent duplicate upvotes by checking if document doesn't already exist
+        && !exists(/databases/$(database)/documents/sessionUpvotes/$(upvoteId));
+
+      // Read: allow authenticated users to read upvotes
+      allow read: if request.auth != null;
+
+      // Delete: prevent deletion of upvotes (upvotes are permanent)
+      // allow delete: if false;
+    }
+
+    // -----------------------
+    // Default: deny everything else
+    // -----------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
